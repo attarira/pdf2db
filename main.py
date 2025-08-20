@@ -46,9 +46,14 @@ def main(argv: list[str] | None = None) -> int:
 	try:
 		# 1) Extract
 		raw_df: pd.DataFrame = extract_tables(pdf_path)
+		# Print extracted DataFrame to console
+		print("Extracted DataFrame:")
+		print(raw_df[:10])
 
 		# 2) Transform
 		clean_df: pd.DataFrame = transform_dataframe(raw_df)
+		print("Transformed DataFrame:")
+		print(clean_df[:10])
 
 		# 3) Load
 		database_url = get_database_url()

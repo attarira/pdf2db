@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Iterable
+import re
 
 import pandas as pd
 
@@ -48,12 +49,26 @@ def _coerce_int(series: pd.Series) -> pd.Series:
 	return pd.to_numeric(series, errors="coerce").astype("Int64")
 
 
+def _extract_ymd_digits(value: object) -> str | None:
+	"""Extract an 8-digit YYYYMMDD sequence from a value.
+
+	Prefers the last 8-digit sequence to handle tokens like "1 20250630".
+	"""
+	s = "" if pd.isna(value) else str(value)
+	matches = re.findall(r"(\d{8})", s)
+	if not matches:
+		return None
+	# Prefer last match (e.g., after a leading row number)
+	return matches[-1]
+
+
 def _coerce_date(series: pd.Series, fmt: str = "%Y%m%d") -> pd.Series:
 	"""Coerce a Series of strings like 20240131 into Python date objects.
 
 	Using date objects helps SQLAlchemy/psycopg2 insert into DATE columns directly.
 	"""
-	dt = pd.to_datetime(series.astype(str), format=fmt, errors="coerce")
+	cleaned = series.apply(_extract_ymd_digits)
+	dt = pd.to_datetime(cleaned, format=fmt, errors="coerce")
 	return dt.dt.date
 
 
@@ -67,6 +82,17 @@ def transform_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 	- date_of_restructure -> DATE (YYYYMMDD)
 	"""
 	df = clean_column_headers(df)
+
+	# If row_number is missing but as_of_date contains a row number + date (e.g., "1 20250630"), split them
+	if "row_number" not in df.columns and "as_of_date" in df.columns:
+		pattern = re.compile(r"^\s*(\d+)\D+(\d{8})\s*$")
+		series_str = df["as_of_date"].astype(str)
+		mask = series_str.str.match(pattern)
+		if mask.any():
+			extracted = series_str.str.extract(pattern)
+			# extracted[0] -> row_number, extracted[1] -> yyyymmdd
+			df.loc[mask, "row_number"] = pd.to_numeric(extracted[0], errors="coerce").astype("Int64")
+			df.loc[mask, "as_of_date"] = extracted[1]
 
 	# Apply type conversions if expected columns are present
 	expected_columns: Iterable[str] = (
